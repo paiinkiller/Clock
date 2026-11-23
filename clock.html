@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<title>시계</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #000; color: #fff;
+    font-family: "Roboto", "Noto Sans CJK KR", "Noto Sans KR", sans-serif;
+    overflow: hidden; user-select: none; -webkit-user-select: none; cursor: none;
+  }
+  #stage {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: transform 2s ease;
+  }
+  #time, #date {
+    white-space: nowrap; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  #time { font-weight: 900; letter-spacing: -0.03em; }
+  #date { font-weight: 700; color: #fff; margin-top: 3vh; }
+  #colon { display: inline-block; transition: opacity .3s; margin: 0 -0.02em; position: relative; top: -0.06em; }
+  #offline {
+    position: absolute; right: 1.5vw; bottom: 1.5vh;
+    font-size: 2.2vh; color: #d9534f; display: none;
+  }
+  #portrait {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: #000;
+    display: none; align-items: center; justify-content: center;
+    font-size: 5vw; color: #888; text-align: center;
+  }
+  @media (orientation: portrait) { #portrait { display: flex; } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="time"><span id="hh">--</span><span id="colon">:</span><span id="mm">--</span></div>
+  <div id="date">--</div>
+</div>
+<div id="offline">● Wi-Fi 끊김</div>
+<div id="portrait">태블릿을 가로로 놓아 주세요</div>
+
+<script>
+(function () {
+  var TZ = "Asia/Seoul";
+  var TIME_H = 0.66;   // 시각이 차지할 화면 높이 비율
+  var DATE_H = 0.22;   // 날짜가 차지할 화면 높이 비율
+  var SIDE = 0.96;     // 좌우 여백 (화면 폭의 96%까지 사용)
+
+  var $ = function (id) { return document.getElementById(id); };
+  var days = ["일","월","화","수","목","금","토"];
+  var wk = { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 };
+  var fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ, hour12: false, month: "numeric", day: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", weekday: "short"
+  });
+
+  function parts(d) {
+    var o = {};
+    fmt.formatToParts(d).forEach(function (p) { o[p.type] = p.value; });
+    return { mo:o.month, d:o.day, h:parseInt(o.hour, 10) % 24, mi:o.minute, s:parseInt(o.second, 10), w:wk[o.weekday] };
+  }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  // 글자를 화면에 꽉 차게 맞추기
+  function fitOne(el, maxH) {
+    var W = window.innerWidth * SIDE, H = window.innerHeight * maxH;
+    el.style.fontSize = "100px";
+    var w = el.scrollWidth || 1, h = el.offsetHeight || 1;
+    var size = Math.min(100 * W / w, 100 * H / h);
+    el.style.fontSize = Math.floor(size) + "px";
+  }
+  function fit() { fitOne($("time"), TIME_H); fitOne($("date"), DATE_H); }
+
+  var lastDate = "", lastMin = -1;
+  function tick() {
+    var p = parts(new Date());
+    $("hh").textContent = pad(p.h);
+    $("mm").textContent = p.mi;
+    $("colon").style.opacity = (p.s % 2 === 0) ? 1 : 0.25;
+
+    var ds = p.mo + "월 " + p.d + "일 (" + days[p.w] + ")";
+    if (ds !== lastDate) { lastDate = ds; $("date").textContent = ds; fit(); }
+
+    var m = parseInt(p.mi, 10);
+    if (m !== lastMin) { lastMin = m; shift(); }
+
+    setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
+  }
+
+  // 잔상 방지: 1분마다 아주 조금 이동 (글자가 화면 밖으로 나가지 않을 정도)
+  function shift() {
+    var x = (Math.random() * 2 - 1) * 0.8;
+    var y = (Math.random() * 2 - 1) * 1.5;
+    $("stage").style.transform = "translate(" + x + "vw," + y + "vh)";
+  }
+
+  function net() { $("offline").style.display = navigator.onLine ? "none" : "block"; }
+  window.addEventListener("online", net);
+  window.addEventListener("offline", net);
+
+  function requestWake() {
+    if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(function () {});
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") requestWake();
+  });
+
+  // 탭하면 전체 화면 + 가로 고정
+  document.addEventListener("click", function () {
+    var el = document.documentElement;
+    var req = el.requestFullscreen || el.webkitRequestFullscreen;
+    var p = (req && !document.fullscreenElement && !document.webkitFullscreenElement) ? req.call(el) : null;
+    var lockLand = function () {
+      if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(function () {});
+    };
+    if (p && p.then) p.then(lockLand).catch(function () {}); else lockLand();
+    requestWake();
+  });
+  document.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  window.addEventListener("resize", function () { setTimeout(fit, 200); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+
+  net(); requestWake(); tick(); fit();
+})();
+</script>
+</body>
+</html>
