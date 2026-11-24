@@ -6,27 +6,82 @@
 <meta name="theme-color" content="#000000">
 <title>시계</title>
 <style>
+  :root { --accent: #4fc3f7; --digit: #ffffff; }
   html, body {
     margin: 0; padding: 0; height: 100%; width: 100%;
     background: #000; color: #fff;
     font-family: "Roboto", "Noto Sans CJK KR", "Noto Sans KR", sans-serif;
     overflow: hidden; user-select: none; -webkit-user-select: none; cursor: none;
+    transition: background 3s;
   }
+  body.offwork { background: #0b1f4d; }  /* 일과 외 시간: 짙은 파랑 */
+
+  /* 은은하게 움직이는 배경 빛 */
+  #glow {
+    position: absolute; left: -50%; top: -50%; width: 200%; height: 200%;
+    background:
+      radial-gradient(circle at 35% 40%, var(--accent) 0%, transparent 22%),
+      radial-gradient(circle at 65% 60%, var(--accent) 0%, transparent 18%);
+    opacity: 0.16;
+    animation: drift 90s ease-in-out infinite alternate;
+    transition: background 5s;
+    will-change: transform;
+  }
+  @keyframes drift {
+    0%   { transform: translate(-6%, -4%) rotate(0deg); }
+    50%  { transform: translate(5%, 3%) rotate(20deg); }
+    100% { transform: translate(-3%, 6%) rotate(-15deg); }
+  }
+
   #stage {
     position: absolute; left: 0; top: 0; right: 0; bottom: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     transition: transform 2s ease;
+    padding-bottom: 3vh; box-sizing: border-box;
   }
-  #time, #date {
-    white-space: nowrap; line-height: 1;
-    font-variant-numeric: tabular-nums;
+  #time, #date { white-space: nowrap; line-height: 1; font-variant-numeric: tabular-nums; }
+  #time {
+    font-weight: 900; letter-spacing: -0.03em;
+    color: var(--digit); transition: color 2s;
+    text-shadow: 0 0 0.06em rgba(255,255,255,0.25);
   }
-  #time { font-weight: 900; letter-spacing: -0.03em; }
-  #date { font-weight: 700; color: #fff; margin-top: 3vh; }
-  #colon { display: inline-block; transition: opacity .3s; margin: 0 -0.02em; position: relative; top: -0.06em; }
+  .dg { display: inline-block; }
+  .dg.flip { animation: flip .6s cubic-bezier(.2,.8,.2,1); }
+  @keyframes flip {
+    0%   { transform: translateY(-35%) scaleY(.85); opacity: 0; }
+    100% { transform: translateY(0) scaleY(1); opacity: 1; }
+  }
+  #colon {
+    display: inline-block; color: var(--accent);
+    transition: opacity .3s, color 5s;
+    margin: 0 -0.02em; position: relative; top: -0.06em;
+  }
+  #date { font-weight: 700; margin: 2vh 0; }
+  /* 새벽 리프레시: 배경을 흰/빨/초/파로 돌리고 글자는 검게 (시계는 계속 보임) */
+  body.refresh { animation: rgbcycle 8s steps(1) infinite; }
+  body.refresh #time, body.refresh #date, body.refresh #wday { color: #000 !important; text-shadow: none; }
+  body.refresh #glow, body.refresh #bar { display: none; }
+  @keyframes rgbcycle { 0% { background:#fff; } 25% { background:#f00; } 50% { background:#0f0; } 75% { background:#00f; } }
+  #wday { transition: color 1s; }
+
+  /* 아래쪽 진행 막대: 1분 동안 차오름 */
+  #bar {
+    position: absolute; left: 0; bottom: 0; height: 2.6vh; width: 100%;
+    background: var(--accent); transform-origin: left center; transform: scaleX(0);
+    transition: background 5s;
+  }
+  #bar.run { transition: transform 1s linear, background 5s; }
+  /* 정각 반짝임 */
+  #flash {
+    position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+    background: var(--accent); opacity: 0; pointer-events: none;
+  }
+  #flash.on { animation: flash 2.4s ease-out; }
+  @keyframes flash { 0% { opacity: .55; } 100% { opacity: 0; } }
+
   #offline {
-    position: absolute; right: 1.5vw; bottom: 1.5vh;
-    font-size: 2.2vh; color: #d9534f; display: none;
+    position: absolute; right: 1.5vw; bottom: 4vh;
+    font-size: 2.4vh; color: #ff5252; display: none; font-weight: 700;
   }
   #portrait {
     position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: #000;
@@ -37,19 +92,42 @@
 </style>
 </head>
 <body>
+<div id="glow"></div>
 <div id="stage">
-  <div id="time"><span id="hh">--</span><span id="colon">:</span><span id="mm">--</span></div>
-  <div id="date">--</div>
+  <div id="time"><span class="dg" id="h1">0</span><span class="dg" id="h2">0</span><span id="colon">:</span><span class="dg" id="m1">0</span><span class="dg" id="m2">0</span></div>
+  <div id="date"><span id="md">--</span> <span id="wday"></span></div>
 </div>
+<div id="bar"></div>
+<div id="flash"></div>
 <div id="offline">● Wi-Fi 끊김</div>
 <div id="portrait">태블릿을 가로로 놓아 주세요</div>
 
 <script>
 (function () {
   var TZ = "Asia/Seoul";
-  var TIME_H = 0.66;   // 시각이 차지할 화면 높이 비율
-  var DATE_H = 0.22;   // 날짜가 차지할 화면 높이 비율
-  var SIDE = 0.96;     // 좌우 여백 (화면 폭의 96%까지 사용)
+  var TIME_H = 0.62, DATE_H = 0.20, SIDE = 0.94;
+  var MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  // ===== 일과 시간표 (분 단위: 시*60+분, 시작 포함 ~ 끝 미포함) =====
+  var WORK  = [8*60+30, 17*60+30];                 // 08:30~17:30 배경 검정, 그 외 짙은 파랑
+  var LUNCH = [[12*60, 13*60]];                    // 점심: 시간 글자 노랑
+  var BREAKS = [[10*60+30, 10*60+40], [15*60, 15*60+10]]; // 쉬는 시간: 시간 글자 녹색
+  var YELLOW = "#ffd600", GREEN = "#00e676", WHITE = "#ffffff";
+  function inAny(t, list) { for (var i = 0; i < list.length; i++) if (t >= list[i][0] && t < list[i][1]) return true; return false; }
+  var REFRESH_HOUR = 3; // 매일 새벽 3시 정각 1분 동안 화면 리프레시
+
+  // 시간대별 강조색
+  function accentFor(h) {
+    if (h >= 5 && h < 9)   return "#ffb74d"; // 아침: 주황빛 노랑
+    if (h >= 9 && h < 17)  return "#4fc3f7"; // 낮: 하늘색
+    if (h >= 17 && h < 21) return "#ff7043"; // 저녁: 노을색
+    return "#9575cd";                         // 밤: 보라
+  }
+  var WDAY_COLOR = { 0: "#ff5252", 6: "#448aff" }; // 일요일 빨강, 토요일 파랑
+
+  // 테스트용: clock.html?t=2026-11-28T19:30 처럼 열면 그 시각으로 보여줌
+  var offset = 0;
+  var m = /[?&]t=([^&]+)/.exec(location.search);
+  if (m) { var t = Date.parse(decodeURIComponent(m[1]) + ":00+09:00"); if (!isNaN(t)) offset = t - Date.now(); }
 
   var $ = function (id) { return document.getElementById(id); };
   var days = ["일","월","화","수","목","금","토"];
@@ -58,44 +136,79 @@
     timeZone: TZ, hour12: false, month: "numeric", day: "numeric",
     hour: "2-digit", minute: "2-digit", second: "2-digit", weekday: "short"
   });
-
   function parts(d) {
     var o = {};
     fmt.formatToParts(d).forEach(function (p) { o[p.type] = p.value; });
-    return { mo:o.month, d:o.day, h:parseInt(o.hour, 10) % 24, mi:o.minute, s:parseInt(o.second, 10), w:wk[o.weekday] };
+    return { mo:o.month, d:o.day, h:parseInt(o.hour, 10) % 24, mi:parseInt(o.minute, 10), s:parseInt(o.second, 10), w:wk[o.weekday] };
   }
   function pad(n) { return (n < 10 ? "0" : "") + n; }
 
-  // 글자를 화면에 꽉 차게 맞추기
   function fitOne(el, maxH) {
     var W = window.innerWidth * SIDE, H = window.innerHeight * maxH;
     el.style.fontSize = "100px";
     var w = el.scrollWidth || 1, h = el.offsetHeight || 1;
-    var size = Math.min(100 * W / w, 100 * H / h);
-    el.style.fontSize = Math.floor(size) + "px";
+    el.style.fontSize = Math.floor(Math.min(100 * W / w, 100 * H / h)) + "px";
   }
   function fit() { fitOne($("time"), TIME_H); fitOne($("date"), DATE_H); }
 
-  var lastDate = "", lastMin = -1;
-  function tick() {
-    var p = parts(new Date());
-    $("hh").textContent = pad(p.h);
-    $("mm").textContent = p.mi;
-    $("colon").style.opacity = (p.s % 2 === 0) ? 1 : 0.25;
-
-    var ds = p.mo + "월 " + p.d + "일 (" + days[p.w] + ")";
-    if (ds !== lastDate) { lastDate = ds; $("date").textContent = ds; fit(); }
-
-    var m = parseInt(p.mi, 10);
-    if (m !== lastMin) { lastMin = m; shift(); }
-
-    setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
+  var first = true;
+  function setDigit(id, v) {
+    var el = $(id);
+    if (el.textContent === v) return;
+    el.textContent = v;
+    if (first) return;
+    el.classList.remove("flip"); void el.offsetWidth; el.classList.add("flip");
   }
 
-  // 잔상 방지: 1분마다 아주 조금 이동 (글자가 화면 밖으로 나가지 않을 정도)
+  var lastDate = "", lastMin = -1, lastAccent = "";
+  function tick() {
+    var p = parts(new Date(Date.now() + offset));
+    var hh = pad(p.h), mm = pad(p.mi);
+    setDigit("h1", hh[0]); setDigit("h2", hh[1]);
+    setDigit("m1", mm[0]); setDigit("m2", mm[1]);
+    $("colon").style.opacity = (p.s % 2 === 0) ? 1 : 0.25;
+
+    var tm = p.h * 60 + p.mi;
+    document.body.classList.toggle("offwork", !(tm >= WORK[0] && tm < WORK[1]));
+    var dc = inAny(tm, LUNCH) ? YELLOW : inAny(tm, BREAKS) ? GREEN : WHITE;
+    var ac = (dc === WHITE) ? accentFor(p.h) : dc;   // 점심/쉬는 시간엔 콜론·막대도 같은 색
+    var key = dc + ac;
+    if (key !== lastAccent) {
+      lastAccent = key;
+      document.documentElement.style.setProperty("--digit", dc);
+      document.documentElement.style.setProperty("--accent", ac);
+    }
+
+    var ds = MONTHS[parseInt(p.mo, 10) - 1] + " " + p.d;
+    if (ds !== lastDate) {
+      lastDate = ds;
+      $("md").textContent = ds;
+      $("wday").textContent = "(" + days[p.w] + ")";
+      $("wday").style.color = WDAY_COLOR[p.w] || "#fff";
+      fit();
+    }
+
+    // 진행 막대
+    var bar = $("bar");
+    if (p.s === 0) {
+      bar.classList.remove("run"); bar.style.transform = "scaleX(0)"; void bar.offsetWidth;
+    } else {
+      bar.classList.add("run"); bar.style.transform = "scaleX(" + (p.s / 59) + ")";
+    }
+
+    if (p.mi !== lastMin) {
+      if (!first && p.mi === 0) { var f = $("flash"); f.classList.remove("on"); void f.offsetWidth; f.classList.add("on"); }
+      lastMin = p.mi; shift();
+      // 매시간 날짜 위치를 위/아래로 바꿔서 같은 픽셀에 같은 그림이 계속 남지 않게
+      $("stage").style.flexDirection = (p.h % 2 === 0) ? "column" : "column-reverse";
+      document.body.classList.toggle("refresh", p.h === REFRESH_HOUR && p.mi === 0);
+    }
+    first = false;
+    setTimeout(tick, 1000 - ((Date.now() + offset) % 1000) + 5);
+  }
+
   function shift() {
-    var x = (Math.random() * 2 - 1) * 0.8;
-    var y = (Math.random() * 2 - 1) * 1.5;
+    var x = (Math.random() * 2 - 1) * 2, y = (Math.random() * 2 - 1) * 3;
     $("stage").style.transform = "translate(" + x + "vw," + y + "vh)";
   }
 
@@ -110,15 +223,14 @@
     if (document.visibilityState === "visible") requestWake();
   });
 
-  // 탭하면 전체 화면 + 가로 고정
   document.addEventListener("click", function () {
     var el = document.documentElement;
     var req = el.requestFullscreen || el.webkitRequestFullscreen;
-    var p = (req && !document.fullscreenElement && !document.webkitFullscreenElement) ? req.call(el) : null;
+    var pr = (req && !document.fullscreenElement && !document.webkitFullscreenElement) ? req.call(el) : null;
     var lockLand = function () {
       if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(function () {});
     };
-    if (p && p.then) p.then(lockLand).catch(function () {}); else lockLand();
+    if (pr && pr.then) pr.then(lockLand).catch(function () {}); else lockLand();
     requestWake();
   });
   document.addEventListener("contextmenu", function (e) { e.preventDefault(); });
